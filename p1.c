@@ -8,29 +8,21 @@
 
 #define SERVER_PORT "80"
 #define MAX_CHUNK_SIZE 1000
+#define MAX_TAG_OVERLAP 20 // increased to handle more complex tag overlaps
 
-/*
- * Lookup a host IP address and connect to it using service. Arguments match the first two
- * arguments to getaddrinfo(3).
- *
- * Returns a connected socket descriptor or -1 on error. Caller is responsible for closing
- * the returned socket.
- */
 int lookup_and_connect(const char *host, const char *service);
 
 int main(int argc, char *argv[]) {
-    // initialization of variables used in the program
-    char *host = "www.ecst.csuchico.edu"; // assign the server host to a host variable
+    char *host = "www.ecst.csuchico.edu";
     int chunk_size;
-    int s; // socked descriptor
-    char buf[MAX_CHUNK_SIZE]; // buffer to store received data
+    int s; // socket descriptor
+    char buf[MAX_CHUNK_SIZE + MAX_TAG_OVERLAP]; // extra space for overlap between chunks
     int bytes_received;
     int total_bytes = 0; // total bytes received
-    int h1_count = 0; // number of h1 tags
-    const char *h1_tag = "<h1>"; // h1 tag string to search
-    const char *request = "GET /~kkredo/file.html HTTP/1.0\r\n\r\n"; // http get request
+    int h1_count = 0; // number of <h1> tags
+    const char *h1_tag = "<h1>";
+    const char *request = "GET /~kkredo/file.html HTTP/1.0\r\n\r\n";
 
-    // Check command-line arguments
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <chunk_size>\n", argv[0]);
         exit(1);
@@ -46,30 +38,59 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // Send HTTP GET request
-    if (send(s, request, strlen(request), 0) == -1) {
-        perror("send");
-        close(s);
-        exit(1);
+    // Send HTTP GET request in chunks if necessary
+    size_t total_sent = 0;
+    size_t request_len = strlen(request);
+    while (total_sent < request_len) {
+        ssize_t bytes_sent = send(s, request + total_sent, request_len - total_sent, 0);
+        if (bytes_sent == -1) {
+            perror("send");
+            close(s);
+            exit(1);
+        }
+        total_sent += bytes_sent;
     }
 
-    // Receive and process data
-    while ((bytes_received = recv(s, buf, chunk_size, 0)) > 0) {
+    // Variable to hold the leftover data (potential part of an <h1> tag across chunks)
+    int overlap_len = 0;
+    
+    // Receive and process data in chunks
+    while ((bytes_received = recv(s, buf + overlap_len, chunk_size, 0)) > 0) {
         total_bytes += bytes_received;
+        
+        // Null-terminate the received data
+        buf[overlap_len + bytes_received] = '\0';
 
-        // Count <h1> tags
+        // Count <h1> tags in the current buffer
         char *ptr = buf;
         while ((ptr = strstr(ptr, h1_tag)) != NULL) {
             h1_count++;
-            ptr += strlen(h1_tag); // move the pointer forward to avoid counting the same tag again
+            ptr += strlen(h1_tag); // Move the pointer forward to avoid counting the same tag again
+        }
+
+        // Handle the leftover data for next chunk (checking if a tag spans across chunks)
+        if (bytes_received == chunk_size) {
+            // Check if the last part of the current chunk has an incomplete <h1> tag
+            int end_overlap_len = strlen(h1_tag) - 1;
+            if (end_overlap_len > 0) {
+                // Copy part of the current chunk to the beginning of the next one
+                memcpy(buf, buf + chunk_size - end_overlap_len, end_overlap_len);
+                overlap_len = end_overlap_len;
+            } else {
+                overlap_len = 0;
+            }
         }
     }
 
-    // Check for errors in recv
     if (bytes_received == -1) {
         perror("recv");
         close(s);
         exit(1);
+    }
+
+    // Check if connection was closed by the server
+    if (bytes_received == 0) {
+        printf("Connection closed by the server\n");
     }
 
     // Print results
@@ -85,37 +106,38 @@ int lookup_and_connect(const char *host, const char *service) {
     struct addrinfo *rp, *result;
     int s;
 
-    // Translate host name into peer's IP address
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC; // Use AF_UNSPEC instead of AF_INET to allow ipv4 or ipv6
-    hints.ai_socktype = SOCK_STREAM; // use TCP
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = 0;
     hints.ai_protocol = 0;
-    // get address information
-    if ((s = getaddrinfo(host, service, &hints, &result)) {
+
+    if ((s = getaddrinfo(host, service, &hints, &result)) != 0) {
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
         return -1;
     }
 
-    // Iterate through the address list and try to connect
     for (rp = result; rp != NULL; rp = rp->ai_next) {
         if ((s = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol)) == -1) {
-            continue; // find the next address if socket creation fails
+            continue;
         }
 
         if (connect(s, rp->ai_addr, rp->ai_addrlen) != -1) {
-            break; // successful connection
+            break;
         }
 
-        close(s); // close socket if connection fails
+        close(s);
     }
 
-    if (rp == NULL) { // no address 
+    if (rp == NULL) {
         perror("connect");
-        freeaddrinfo(result); // free addrinfo
+        freeaddrinfo(result);
         return -1;
     }
 
-    freeaddrinfo(result); // free addrinfo
-    return s; // return the connected socket discriptor
+    freeaddrinfo(result);
+    return s;
 }
+
+
+
