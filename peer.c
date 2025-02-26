@@ -34,7 +34,23 @@ int main(int argc, char *argv[]) {
             create_join_request(join_request, peer_id);
             send_data(sock, join_request, sizeof(join_request));
         } else if (strcmp(command, "SEARCH") == 0) {
-            // ... (Implement SEARCH command logic)
+            char file_name[255];
+            printf("Enter a file name:");
+            if (fgets(file_name, sizeof(file_name), stdin) == NULL) break;
+            file_name[strcspn(file_name, "\n")] = 0; // remove newline
+            // search request
+            uint8_t search_request[256];
+            create_search_request(search_request,file_name);
+            send_data(sock,search_request,strlen(file_name));
+            // search response
+            uint8_t search_response[10]; // 4B (peer id) + 4B (peer ipv4 address) + 2B (Peer port number)
+            int response_size = recv_data(sock,search_response, sizeof(search_response));
+            if (response_size > 0) 
+            {
+                process_search_response(search_response);
+            } else {
+                printf("File not indexed by registry");
+            }
         } else if (strcmp(command, "PUBLISH") == 0) {
             // ... (Implement PUBLISH command logic)
         } else if (strcmp(command, "EXIT") == 0) {
