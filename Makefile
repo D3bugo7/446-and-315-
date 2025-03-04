@@ -1,27 +1,18 @@
-# Makefile for peer.c
-
-# Executable name
-EXE = peer
-
-# Compiler flags
+# Makefile
+CC = gcc
 CFLAGS = -Wall
 
-# Linker flags
-LDLIBS =
+peer: peer.o network.o protocol.o
+    $(CC) $(CFLAGS) -o peer peer.o network.o protocol.o
 
-# Compiler
-CC = gcc
-
-.PHONY: all
-all: $(EXE)
-
-$(EXE): peer.o
-    $(CC) $(CFLAGS) -o $(EXE) peer.o $(LDLIBS)
-
-# Implicit rules defined by Make, but you can redefine if needed
-peer.o: peer.c
+peer.o: peer.c network.h protocol.h
     $(CC) $(CFLAGS) -c peer.c
 
-.PHONY: clean
+network.o: network.c network.h
+    $(CC) $(CFLAGS) -c network.c
+
+protocol.o: protocol.c protocol.h
+    $(CC) $(CFLAGS) -c protocol.c
+
 clean:
-    rm -f $(EXE) *.o
+    rm -f peer *.o
